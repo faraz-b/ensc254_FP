@@ -1,2 +1,2 @@
 # ensc254_FP
-Cuz we're boujee
+Github repo for the Z-code interpreter final project. Why? Cuz we can. 
