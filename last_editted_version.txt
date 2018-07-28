@@ -1,0 +1,314 @@
+.global asm_main
+.align 4
+memory: .space 2000000 ;@ 2MB reserved for own use throughout program
+.align 4
+Zmem: .space 2000000 ;@ 2MB for uploading Zprogram
+.align 4
+Zstack: .space 1000000 ;@ 1MB for Zstack
+.align 4
+FZreg: .space 1000000 ;@ 1MB for function local Zregisters
+.align 4
+temp: .space 256 ;@ 256B temporary storage for holding temp
+;@ operands to variable operand count instructions
+.align 4
+
+asm_main:
+
+;@ Set up transmitter to what TeraTerm is expecting
+;@ receiver is already set up
+LDR R9, =0x20
+
+LDR R4, =0xE0001004 ;@ Mode Register -- Tera Term transmitter
+STR R9, [R4, #0]
+
+;@ Start Baud rate setup
+LDR R9, =0x3E ;@ 62 in decimal value
+LDR R4, =0xE0001018 ;@ Baud rate generator
+STR R9, [R4, #0]
+
+;@ Complete baud rate setup
+LDR R9, =0x6
+LDR R4, =0xE0001034 ;@ Baud rate divider
+STR R9, [R4, #0]
+
+;@ Enable and reset the UART
+LDR R9, =0x117
+LDR R4, =0xE0001000 ;@ Control register
+STR R9, [R4, #0]
+  LDR R7, =Zmem
+  MOV R4, #0
+  LDRB R8, =0b11100101
+  STRB R8, [R7, R4]
+  ADD R4, R4, #1
+  LDRB R8, =0b11111111
+  STRB R8, [R7, R4]
+  ADD R4, R4, #1
+  LDRB R8, =0b01000101
+  STRB R8, [R7, R4]
+  MOV R4, #0
+
+
+decode_instructions_loop:
+  LDRB R8, [R7, R4] ;@ Fetch byte from Zmem at ZPC -- Opcode
+  ADD R4, R4, #1
+  LSR R9, R8, #6 ;@ shift the bits we want to the right end
+  CMP R9, #3 ;@ C-Type - 11
+  BEQ c_type
+  CMP R9, #2 ;@ A-Type - 10
+  BEQ a_type
+  CMP R9, #1 ;@ B-Type - 01
+  BEQ b_type
+  //MOV PC, LR
+
+a_type:
+  LDR R10, =48 ;@ bits 5 & 4
+  AND R11, R8, R10
+  CMP R11, #48 ;@ operand count is zero - 11
+  CMP R11, #0 ;@ two byte constant - 00
+  CMP R11, #16 ;@ one byte constant - 01
+  CMP R11, #32 ;@ one byte register indicator - 10
+  LDR R12, =15 ;@ instruction indicator -- bits 3 - 0
+  AND R9, R8, R12
+
+b_type:
+  LDR R10, =64
+  AND R11, R8, R10
+  CMP R11, #0 ;@ 1st operand: one byte constant
+  CMP R11, #64 ;@ 1st operand: operand in a register
+  LDR R10, =32
+  AND R11, R8, R10
+  CMP R11, #0 ;@ 2nd operand: one byte constant
+  CMP R11, #32 ;@ 2nd operand: operand in register
+
+c_type:
+  LDR R10, =31
+  AND R9, R8, R10
+  PUSH {R9} ;@ instruction indicator
+  LDR R10, =32
+  AND R9, R8, R10
+  CMP R9, #0 
+  BEQ two_operands ;@ two operands
+  BNE var_operands ;@ variable operand count
+
+
+Decode_text:
+/*
+Store_Opcodes:
+  LDRB R0, =Zmem
+  MOV R2, #0
+  LDR R9, =0x0 ;@ RTRUE
+  BL inc_counter
+  LDR R9, =0x1 ;@ RFALSE
+  BL inc_counter
+  LDR R9, =0x2 ;@ PRINT
+  BL inc_counter
+  LDR R9, =0x3 ;@ PRINT_RET
+  BL inc_counter
+  LDR R9, =0x8 ;@ RET_POPPED
+  BL inc_counter
+  LDR R9, =0xB ;@ NEW_LINE
+  BL inc_counter
+  LDR R9, =0xD ;@ VERIFY
+  BL inc_counter
+  LDR R9, =0xE ;@ Extended opcode
+  BL inc_counter
+  LDR R9, =0xF ;@ PIRACY
+  BL inc_counter
+  LDR R9, =0xD ;@ VERIFY
+  BL inc_counter
+*/
+inc_counter:
+  STR R9, [R0, R2]
+  ADD R2, R2, #1 ;@ increment Zmem offset
+  ADD R9, R9, #1
+  MOV R15, R14
+
+no_operands:
+OP0_0: ;@ RTRUE
+OP0_1: ;@ RFALSE
+OP0_2: ;@ PRINT
+OP0_3: ;@ PRINT_RET
+OP0_8: ;@ RET_POPPED
+OP0_B: ;@ NEW_LINE
+OP0_D: ;@ VERIFY
+OP0_E: ;@ Extended opcode
+
+one_operand:
+OP1_00: ;@ JZ
+OP1_1: ;@ GET_SIBLING
+OP1_2: ;@ GET_CHILD
+OP1_3: ;@ GET_PARENT
+OP1_5: ;@ INC
+OP1_6: ;@ DEC
+OP1_8: ;@ CALL_IS
+OP1_B: ;@ RET
+OP1_D: ;@ PRINT_PADDR
+OP1_F: ;@ CALL_IN
+
+two_operands:
+B c_type
+/*
+  POP {R9}
+
+  LDR R10, =#0x00
+  CMP R9, R10
+  BEQ crash_mode ;@ Illegal instruction
+
+  LDR R10, =#0x01
+  CMP R9, R10
+  BEQ OP2_01 ;@ JE
+  LDR R10, =#0x02
+  CMP R9, R10
+  BEQ OP2_02 ;@ JL
+  LDR R10, =#0x03
+  CMP R9, R10
+  BEQ OP2_03 ;@ JG
+
+  LDR R10, =#0x04
+  CMP R9, R10
+  BEQ crash_mode ;@ DEC_CHK
+  LDR R10, =#0x05
+  CMP R9, R10
+  BEQ crash_mode ;@ INC_CHK
+
+  LDR R10, =#0x06
+  CMP R9, R10
+  BEQ OP2_06 ;@ JIN
+  LDR R10, =#0x07
+  CMP R9, R10
+  BEQ OP2_07 ;@ TEST
+  LDR R10, =#0x08
+  CMP R9, R10
+  BEQ OP2_08 ;@ JG
+  LDR R10, =#0x09
+  CMP R9, R10
+  BEQ OP2_09 ;@ AND
+  LDR R10, =#0x0A
+  CMP R9, R10
+  BEQ OP2_0A ;@ TEST_ATTR
+  LDR R10, =#0x0B
+  CMP R9, R10
+  BEQ OP2_0B ;@ SET_ATTR
+  LDR R10, =#0x0C
+  CMP R9, R10
+  BEQ OP2_0C ;@ CLEAR_ATTR
+  LDR R10, =#0x0D
+  CMP R9, R10
+  BEQ OP2_0D ;@ STORE
+
+  LDR R10, =#0x0E
+  CMP R9, R10
+  BEQ OP2_0E ;@ INSERT_OBJ
+  LDR R10, =#0x0F
+  CMP R9, R10
+  BEQ OP2_0F ;@ LOADW
+  LDR R10, =#0x10
+  CMP R9, R10
+  BEQ OP2_10 ;@ LOADB
+  LDR R10, =#0x11
+  CMP R9, R10
+  BEQ OP2_11 ;@ GET_PROP
+
+  LDR R10, =#0x14
+  CMP R9, R10
+  BEQ OP2_14 ;@ ADD
+  LDR R10, =#0x15
+  CMP R9, R10
+  BEQ OP2_15 ;@ SUB
+  LDR R10, =#0x16
+  CMP R9, R10
+  BEQ OP2_16 ;@ MUL
+  LDR R10, =#0x17
+  CMP R9, R10
+  BEQ OP2_17 ;@ DIV
+  LDR R10, =#0x18
+  CMP R9, R10
+  BEQ OP2_18 ;@ MOD
+  LDR R10, =#0x19
+  CMP R9, R10
+  BEQ OP2_19 ;@ CALL_2S
+  LDR R10, =#0x1A
+  CMP R9, R10
+  BEQ OP2_1A ;@ CALL_2N
+  LDR R10, =#0x1B
+  CMP R9, R10
+  BEQ OP2_1B ;@ SET_COLOUR
+
+  LDR R10, =#0x1C
+  CMP R9, R10
+  BEQ crash_mode ;@ crash_mode
+  LDR R10, =#0x1D
+  CMP R9, R10
+  BEQ crash_mode ;@ crash_mode
+  LDR R10, =#0x1E
+  CMP R9, R10
+  BEQ OP2_1E ;@ crash_mode
+  LDR R10, =#0x1F
+  CMP R9, R10
+  BEQ crash_mode ;@ crash_mode
+
+
+OP2_01: ;@ JE
+OP2_02: ;@ JL
+OP2_03: ;@ JG
+OP2_06: ;@ JIN
+OP2_08: ;@ OR
+OP2_09: ;@ AND
+OP2_0A: ;@ TEST_ATTR
+OP2_0B: ;@ SET_ATTR
+OP2_0C: ;@ CLEAR_ATTR
+OP2_0D: ;@ STORE
+OP2_14: ;@ ADD
+  ADD R4, R4, #1
+  LDR R8, [R7, R4]
+  MOV R10, #6
+  PUSH {R8-R12}
+  BL fetch_next
+  POP {R8-R12}
+*/
+
+var_operands:
+  POP {R9}
+  CMP R9, #5
+  BEQ VAR_05 ;@ PRINT_CHAR
+  BNE var_operands
+
+  ;@BNE carsh
+VAR_05: ;@ PRINT_CHAR
+  ADD R4, R4, #1
+  BL Fetch_OP ;@ USING BL HERE MAY HAVE TO NEST IT
+  LDR R8, [R7, R4]
+  LDR R12, =0xE0001030
+  STR R8, [R12,#0]
+  B done
+
+Fetch_OP:
+  LDR R12, =0b11000000
+  LDR R8, [R7, R4]
+  LDR R11, =memory
+  STR R8, [R11, #100] ;@storing the operand decoder in #100th space in memory
+  loop:
+  LDR R8, [R11, #100]
+  ADD R11, R8, R12
+  CMP R11, #0
+  BEQ 16_bit_constant
+  CMP R11, #1
+  BEQ 8_bit_constant
+  CMP R11, #2
+  BEQ operand_in_register
+  CMP R11, #3
+  MOVEQ PC,LR ;@ RETURNING TO BL HERE MAY HAVE TO NEST IT
+  LSR R12, #2
+  B loop
+
+16_bit_constant:
+  LDR R11, =memory
+  ADD R4, R4, #1
+  LDRH R0, [R7, R4] 
+  STRH R0, [R11, #104]
+  ADD R4, R4, #2
+  
+  B loop
+  
+  done:
+  B done
