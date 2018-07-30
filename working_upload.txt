@@ -1,0 +1,154 @@
+.global asm_main
+.align 4
+memory: .space 2000000 ;@ 2MB reserved for own use throughout program
+.align 4
+Zmem: .space 2000000 ;@ 2MB for uploading Zprogram
+.align 4
+Zstack: .space 1000000 ;@ 1MB for Zstack
+.align 4
+FZreg: .space 1000000 ;@ 1MB for function local Zregisters
+.align 4
+temp: .space 256 ;@ 256B temporary storage for holding temp operands to variable operand count instructions
+.align 4
+
+asm_main:
+  ;@ Set up transmitter to what TeraTerm is expecting
+  LDR R9, =0x20
+  LDR R4, =0xE0001004 ;@ Mode Register -- Tera Term transmitter
+  STR R9, [R4, #0]
+  ;@ Start Baud rate setup
+  LDR R9, =0x3E
+  LDR R4, =0xE0001018 ;@ Baud rate generator
+  STR R9, [R4, #0]
+  ;@ Complete baud rate setup
+  LDR R9, =6
+  LDR R4, =0xE0001034 ;@ Baud rate divider
+  STR R9, [R4, #0]
+  ;@ Enable and reset the UART
+  LDR R9, =0x117
+  LDR R4, =0xE0001000 ;@ Control register
+  STR R9, [R4, #0]
+  ;@ address of the sliding switches
+  LDR R1, =0x41220000
+  ;@ read initial value of sliders
+  LDR R8, [R1, #0]
+  LDR R11, =memory
+  STR R8, [R11, #0] ;@ At the zero-th position in memory we store the current value of the sliders
+  MOV R4, #0
+  LDR R7, =Zmem ;@ FIXED VALUE DON'T CHANGE R7
+  LDR R10, =0 ;@ initial value of the receiver fifo store counter
+  STR R10, [R11, #4] ;@ At the fourth position in memory we store the current value of upload pointer
+
+Check_switch:
+  LDR R1, =0x41220000 ;@ address of the sliding switches
+  LDR R8, [R11, #0] ;@ Getting the value of last state of sliders
+  LDR R10, =104800
+  LDR R9, [R1, #0]
+  CMP R9, R8
+  BEQ Check_switch
+  BNE Delay
+Delay:
+  SUBS R10, R10, #1
+  BEQ Verify_switch
+  BNE Delay
+Verify_switch:
+  LDR R9, [R1, #0]
+  LDR R10, =104800
+  CMP R8, R9
+  BEQ Check_switch
+  MOVNE R8, R9
+  LDRNE R11, =memory
+  STRNE R8, [R11, #0]
+  BNE Switch_changed
+
+Switch_changed:
+  LDR R9, =128
+  AND R9, R8, R9
+  CMP R9, #128
+  BLEQ upload_mode
+  LDR R9, =64
+  AND R9, R8, R9
+  CMP R9, #64
+  BLEQ no_header_mode
+  BLNE header_mode
+  LDR R9, =128
+  AND R9, R8, R9
+  CMP R9, #128
+  BLNE run_mode
+  LDR R9, =32
+  AND R9, R8, R9
+  CMP R9, #32
+  BLEQ debug_mode
+  BLNE game_mode
+  LDR R1, =0x41220000 ;@ address of the sliding switches
+  LDR R11, =memory
+  LDR R8, [R11, #0]
+  LDR R9, [R1, #0]
+  CMP R8, R9
+  BEQ Switch_changed
+  BNE Check_switch
+
+upload_mode:
+  PUSH {R8-R12, LR}
+  ;@LDR R10, =Zmem
+  LDR R11, =2000000 ;@ Size of Zmem
+  LDR R8, =0 ;@ Zmem offset incrementor
+  LDR R9, =0 ;@ the null value to store at Zmem offset by R8
+  LDR R12, =1000000 ;@ Size of Zstack
+  //BL Delete_Zmemory
+  //BL Reset_Zstack
+  BL Check_receiver_fifo_and_store
+  POP {R8-R12, PC}
+  ;@MOV PC, LR
+
+Check_receiver_fifo_and_store:
+  LDR R9, =0xE000102C ;@  XUARTPS_SR_OFFSET
+  LDR R10, [R9]
+  TST R10,#2
+  BEQ Store
+  MOVNE PC, LR
+  ;@BNE Check_receiver_fifo_and_store
+
+Store:
+  LDR R8, =0xE0001030 ;@ Memory location where hello world is stored
+  LDRB R9, [R8] ;@ loading the input from UART memory location to R8
+  STRB R9, [R7, R4] ;@ Storing
+  ADD R4, #1
+  B Check_receiver_fifo_and_store
+/*
+Delete_Zmemory:
+  STR R9, [R7, R8]
+  ADD R8, R8, #1
+  CMP R11, R8
+  BPL Delete_Zmemory
+  LDREQ R8, =0
+  MOVEQ PC, LR
+
+Reset_Zstack:
+  STR R9, [R10, R8]
+  ADD R8, R8, #4
+  CMP R12, R8
+  BPL Delete_Zmemory
+  LDREQ R8, =0
+  MOVEQ PC, LR
+*/
+
+run_mode:
+  MOV PC, LR
+
+no_header_mode:
+  MOV PC, LR
+
+header_mode:
+  MOV PC, LR
+
+debug_mode:
+  MOV PC, LR
+
+game_mode:
+  MOV PC, LR
+
+done:
+  B done
+
+
