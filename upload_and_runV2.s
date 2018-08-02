@@ -99,6 +99,11 @@ Delete_Zstack:
   BEQ upload_mode
   
 upload_mode:
+  LDR R9, =64
+  AND R9, R8, R9
+  CMP R9, #64
+  BLEQ no_header_mode
+  BLNE header_mode
   LDR R10, =0x41220000 ;@ address of the sliding switches
   LDR R8, =#128
   PUSH {R8-R12}
