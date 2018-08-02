@@ -53,9 +53,11 @@ Check_transmitter_fifo_and_print:
   CMP R12, #0
   MOVEQ R12, #32
   STREQ R12, [R10]
+  MOVEQ PC, LR
   CMP R12, #1
   MOVEQ R12, #10
   STREQ R12, [R12]
+  MOVEQ PC, LR
   ADD R12, R12, #91
   MOV R11, #97
   which_letter:
